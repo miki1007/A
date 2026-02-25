@@ -1,5 +1,6 @@
 package com.mikix.ui
 
+import android.view.Choreographer
 import android.view.TextureView
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -16,7 +17,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -32,27 +36,41 @@ fun PerformanceGated3DX(
     lowPerformanceMode: Boolean,
     modifier: Modifier = Modifier
 ) {
-    if (filamentEnabled && !lowPerformanceMode) {
-        FilamentXCard(modifier)
+    val context = LocalContext.current
+    val capable = remember(context) { DeviceCapability.supportsRealtime3D(context) }
+    if (filamentEnabled && !lowPerformanceMode && capable) {
+        FilamentRealtimeXCard(modifier)
     } else {
         RotatingX3DMark()
     }
 }
 
 @Composable
-private fun FilamentXCard(modifier: Modifier = Modifier) {
+private fun FilamentRealtimeXCard(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val engine = remember { Engine.create() }
+    var frameCount by remember { mutableIntStateOf(0) }
+
     DisposableEffect(Unit) {
-        onDispose { engine.destroy() }
+        val callback = object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                frameCount++
+                Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+        Choreographer.getInstance().postFrameCallback(callback)
+        onDispose {
+            Choreographer.getInstance().removeFrameCallback(callback)
+            engine.destroy()
+        }
     }
 
     val transition = rememberInfiniteTransition(label = "filament-x")
-    val angle = transition.animateFloat(
+    val angle by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(5000, easing = LinearEasing),
+            animation = tween(4200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "angle"
@@ -61,7 +79,7 @@ private fun FilamentXCard(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(160.dp)
+            .height(180.dp)
             .background(Color(0xFF0A1427))
             .padding(8.dp),
         contentAlignment = Alignment.Center
@@ -71,10 +89,10 @@ private fun FilamentXCard(modifier: Modifier = Modifier) {
             text = "X",
             style = MaterialTheme.typography.displayLarge,
             color = Color(0xFFF5B938),
-            modifier = Modifier.rotate(angle.value)
+            modifier = Modifier.rotate(angle)
         )
         Text(
-            text = "Filament mode",
+            text = "Filament realtime mode • frame $frameCount",
             color = Color(0x88FFFFFF),
             modifier = Modifier.align(Alignment.BottomCenter)
         )

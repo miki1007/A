@@ -10,7 +10,9 @@ class MikixRepository @Inject constructor(
     private val dao: MikixDao,
     private val authApi: AuthApi,
     private val syncApi: SyncApi,
-    private val communityApi: CommunityApi
+    private val communityApi: CommunityApi,
+    private val authSessionManager: AuthSessionManager,
+    private val liveFeedSocket: CommunityLiveFeedSocket
 ) {
     fun exercises(search: String = ""): Flow<List<Exercise>> = if (search.isBlank()) dao.exercises() else dao.searchExercises(search)
     fun templates() = dao.templates()
@@ -20,6 +22,7 @@ class MikixRepository @Inject constructor(
     fun feed() = dao.feed()
     fun challenges() = dao.challenges()
     fun account() = dao.account()
+    fun liveFeedEvents() = liveFeedSocket.events
 
     suspend fun seedExercisesIfEmpty() {
         dao.insertExercises(SeedExercises.list)
@@ -59,18 +62,23 @@ class MikixRepository @Inject constructor(
     suspend fun muscleBalance(weekStart: Long) = dao.muscleVolume(weekStart)
 
     suspend fun login(email: String, password: String): AuthResponse {
-        val response = authApi.login(AuthRequest(email, password))
+        val response = retryIo { authApi.login(AuthRequest(email, password)) }
         dao.upsertAccount(Account(id = response.userId, email = email))
+        authSessionManager.saveTokens(response)
+        liveFeedSocket.connect(response.accessToken)
         return response
     }
 
     suspend fun register(email: String, password: String): AuthResponse {
-        val response = authApi.register(AuthRequest(email, password))
+        val response = retryIo { authApi.register(AuthRequest(email, password)) }
         dao.upsertAccount(Account(id = response.userId, email = email))
+        authSessionManager.saveTokens(response)
+        liveFeedSocket.connect(response.accessToken)
         return response
     }
 
-    suspend fun syncSessions(accessToken: String) {
+    suspend fun syncSessions(accessToken: String? = null) {
+        val token = accessToken ?: authSessionManager.ensureValidAccessToken() ?: return
         val local = sessionsSnapshot().map {
             CloudSessionDto(
                 id = it.id,
@@ -82,29 +90,60 @@ class MikixRepository @Inject constructor(
                 totalVolume = it.totalVolume
             )
         }
-        syncApi.pushSessions("Bearer $accessToken", local)
-        val remote = syncApi.pullSessions("Bearer $accessToken")
-        remote.forEach {
-            dao.insertSession(
-                WorkoutSession(
-                    id = it.id,
-                    startedAt = it.startedAt,
-                    endedAt = it.endedAt,
-                    templateId = it.templateId,
-                    notes = it.notes,
-                    perceivedEffort = it.perceivedEffort,
-                    totalVolume = it.totalVolume
+        retryIo { syncApi.pushSessions("Bearer $token", local) }
+
+        var page = 1
+        var batch: List<CloudSessionDto>
+        do {
+            batch = retryIo { syncApi.pullSessions("Bearer $token", sinceEpochMillis = null, page = page, limit = 50) }
+            batch.forEach {
+                dao.insertSession(
+                    WorkoutSession(
+                        id = it.id,
+                        startedAt = it.startedAt,
+                        endedAt = it.endedAt,
+                        templateId = it.templateId,
+                        notes = it.notes,
+                        perceivedEffort = it.perceivedEffort,
+                        totalVolume = it.totalVolume
+                    )
                 )
-            )
+            }
+            page++
+        } while (batch.isNotEmpty())
+    }
+
+    suspend fun refreshCommunity(accessToken: String? = null) {
+        val token = accessToken ?: authSessionManager.ensureValidAccessToken() ?: return
+        val bearer = "Bearer $token"
+
+        var page = 1
+        var hasMore = true
+        while (hasMore) {
+            val groupsResponse = retryIo { communityApi.groups(bearer, page = page, limit = 20) }
+            dao.upsertGroups(groupsResponse.items.map { GroupEntity(it.id, it.name, it.description, it.memberCount) })
+            hasMore = groupsResponse.meta.hasMore
+            page++
+        }
+
+        var cursor: String? = null
+        do {
+            val feedResponse = retryIo { communityApi.feed(bearer, cursor = cursor, limit = 30) }
+            dao.upsertFeed(feedResponse.items.map { FeedPostEntity(it.id, it.groupId, it.authorName, it.message, it.createdAt) })
+            cursor = feedResponse.meta.nextCursor
+        } while (cursor != null)
+
+        page = 1
+        hasMore = true
+        while (hasMore) {
+            val challengeResponse = retryIo { communityApi.challenges(bearer, page = page, limit = 20) }
+            dao.upsertChallenges(challengeResponse.items.map { ChallengeEntity(it.id, it.title, it.progress, it.unit, it.target) })
+            hasMore = challengeResponse.meta.hasMore
+            page++
         }
     }
 
-    suspend fun refreshCommunity(accessToken: String) {
-        val bearer = "Bearer $accessToken"
-        dao.upsertGroups(communityApi.groups(bearer).map { GroupEntity(it.id, it.name, it.description, it.memberCount) })
-        dao.upsertFeed(communityApi.feed(bearer).map { FeedPostEntity(it.id, it.groupId, it.authorName, it.message, it.createdAt) })
-        dao.upsertChallenges(communityApi.challenges(bearer).map { ChallengeEntity(it.id, it.title, it.progress, it.unit, it.target) })
-    }
+    fun disconnectLiveFeed() = liveFeedSocket.disconnect()
 
     private suspend fun sessionsSnapshot(): List<WorkoutSession> = sessions().first()
 }

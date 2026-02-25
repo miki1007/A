@@ -57,3 +57,12 @@ MikiX is an offline-first gym workout tracker built with Kotlin + Jetpack Compos
 ## Binary-safe repository note
 - `gradle/wrapper/gradle-wrapper.jar` is intentionally omitted to keep PRs binary-free in environments that reject binary patches.
 - Regenerate it locally with `gradle wrapper` (using JDK 17) if you want to run `./gradlew` directly.
+
+
+## Production hardening added
+- Token refresh path via `/v1/auth/refresh` and `AuthSessionManager` token persistence/expiry management.
+- Retry with exponential backoff for sync/community API calls.
+- Pagination support for groups/challenges and cursor feed fetching.
+- WebSocket live feed client scaffold for real-time community updates.
+- AI Coach engine for routine generation + personalized recovery score.
+- Filament realtime 3D X is performance-gated by device RAM capability and user toggle.

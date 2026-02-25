@@ -7,10 +7,14 @@ import kotlinx.serialization.Serializable
 data class AuthRequest(val email: String, val password: String)
 
 @Serializable
+data class RefreshTokenRequest(@SerialName("refresh_token") val refreshToken: String)
+
+@Serializable
 data class AuthResponse(
     @SerialName("user_id") val userId: String,
     @SerialName("access_token") val accessToken: String,
-    @SerialName("refresh_token") val refreshToken: String
+    @SerialName("refresh_token") val refreshToken: String,
+    @SerialName("expires_in_sec") val expiresInSec: Long = 3600
 )
 
 @Serializable
@@ -48,4 +52,37 @@ data class ChallengeDto(
     val progress: Float,
     val unit: String,
     val target: Int
+)
+
+@Serializable
+data class PaginationMeta(
+    val page: Int,
+    val limit: Int,
+    @SerialName("next_cursor") val nextCursor: String? = null,
+    @SerialName("has_more") val hasMore: Boolean = false
+)
+
+@Serializable
+data class GroupPageResponse(
+    val items: List<GroupDto>,
+    val meta: PaginationMeta
+)
+
+@Serializable
+data class FeedPageResponse(
+    val items: List<FeedPostDto>,
+    val meta: PaginationMeta
+)
+
+@Serializable
+data class ChallengePageResponse(
+    val items: List<ChallengeDto>,
+    val meta: PaginationMeta
+)
+
+@Serializable
+data class LiveFeedEvent(
+    val type: String,
+    val payload: String,
+    @SerialName("created_at") val createdAt: Long
 )

@@ -213,6 +213,7 @@ fun CommunityScreen(vm: MainViewModel) {
     val groups by vm.groups.collectAsState()
     val feed by vm.feed.collectAsState()
     val challenges by vm.challenges.collectAsState()
+    val liveEvent by vm.liveFeedEvent.collectAsState()
     Column(Modifier.fillMaxSize().background(Bg).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         PremiumHeader("Group Workouts & Challenges", "Compete. Motivate. Win together.")
         PhoneMockCard {
@@ -234,6 +235,7 @@ fun CommunityScreen(vm: MainViewModel) {
                 (if (feed.isEmpty()) mockFeed else feed.map { "${it.authorName}: ${it.message}" }).take(3).forEach {
                     Text(it, color = Color(0xFFD0D8E8))
                 }
+                Text("Live: $liveEvent", color = Color(0xFFA8B3C6))
             }
         }
     }
@@ -246,6 +248,8 @@ fun ProfileScreen(vm: MainViewModel) {
         val filamentEnabled by vm.filament3dEnabled.collectAsState()
         val lowPerf by vm.lowPerformanceMode.collectAsState()
         val cloudSync by vm.cloudSyncEnabled.collectAsState()
+        val generatedRoutine by vm.generatedRoutine.collectAsState()
+        val recoverySummary by vm.recoverySummary.collectAsState()
         PhoneMockCard {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 profileStats.forEach { StatChip(it.first, it.second) }
@@ -266,6 +270,12 @@ fun ProfileScreen(vm: MainViewModel) {
                     Button(onClick = { vm.login("demo@mikix.app", "password123") }) { Text("Login") }
                     Button(onClick = { vm.triggerCloudSync() }) { Text("Sync now") }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { vm.generateAiRoutine() }) { Text("Generate AI Routine") }
+                    Button(onClick = { vm.updateRecoveryScore() }) { Text("Recovery Score") }
+                }
+                Text(generatedRoutine, color = Color(0xFFD0D8E8))
+                Text(recoverySummary, color = Gold, fontWeight = FontWeight.SemiBold)
             }
         }
         PhoneMockCard {

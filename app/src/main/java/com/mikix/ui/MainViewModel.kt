@@ -17,6 +17,11 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.mikix.data.Exercise
 import com.mikix.data.MikixRepository
+import com.mikix.domain.AiCoach
+import com.mikix.domain.Equipment
+import com.mikix.domain.Experience
+import com.mikix.domain.Goal
+import com.mikix.domain.RecoveryInputs
 import com.mikix.domain.TrainingCalculators
 import com.mikix.worker.CloudSyncWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,6 +29,8 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
@@ -41,6 +48,12 @@ class MainViewModel @Inject constructor(
     private val completedSets = MutableStateFlow(0)
     private val totalVolume = MutableStateFlow(0.0)
     private val accessToken = MutableStateFlow<String?>(null)
+    private val _generatedRoutine = MutableStateFlow<String>("No AI routine generated yet")
+    val generatedRoutine = _generatedRoutine.asStateFlow()
+    private val _recoverySummary = MutableStateFlow("Recovery score pending")
+    val recoverySummary = _recoverySummary.asStateFlow()
+    private val _liveFeedEvent = MutableStateFlow("Waiting for live events")
+    val liveFeedEvent = _liveFeedEvent.asStateFlow()
 
     val exercises = query.combine(repository.exercises()) { q, ex -> ex.filter { it.name.contains(q, true) } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -67,6 +80,9 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch { repository.seedExercisesIfEmpty() }
         viewModelScope.launch {
             accessToken.value = dataStore.data.first()[stringPreferencesKey("access_token")]
+        }
+        viewModelScope.launch {
+            repository.liveFeedEvents().collect { _liveFeedEvent.value = it }
         }
     }
 
@@ -142,6 +158,39 @@ class MainViewModel @Inject constructor(
 
     fun setCloudSyncEnabled(enabled: Boolean) {
         viewModelScope.launch { dataStore.edit { it[FeatureFlags.cloudSync] = enabled } }
+    }
+
+    fun generateAiRoutine() {
+        val routine = AiCoach.generateRoutine(
+            input = com.mikix.domain.RoutineInput(
+                goal = Goal.STRENGTH,
+                daysPerWeek = 4,
+                equipment = setOf(Equipment.BARBELL, Equipment.DUMBBELL, Equipment.MACHINE),
+                focusMuscles = setOf("chest", "back", "legs"),
+                experience = Experience.INTERMEDIATE
+            )
+        )
+        _generatedRoutine.value = buildString {
+            append(routine.blockName)
+            append("\n")
+            routine.workouts.forEach {
+                append("Day ${it.day}: ${it.title} -> ${it.exercises.joinToString()}\n")
+            }
+            append(routine.progressionNote)
+        }
+    }
+
+    fun updateRecoveryScore() {
+        val score = AiCoach.recoveryScore(
+            RecoveryInputs(
+                sleepHours = 7.2,
+                restingHeartRateDelta = 3,
+                soreness = 4,
+                stress = 5,
+                readinessSelfScore = 7
+            )
+        )
+        _recoverySummary.value = "${score.zone} (${score.score}) • ${score.guidance}"
     }
 }
 
